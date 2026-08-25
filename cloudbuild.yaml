@@ -1,0 +1,67 @@
+steps:
+  - id: test
+    name: gcr.io/cloud-builders/docker
+    args: ["build", "--target", "test", "."]
+
+  - id: build-runtime
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --target
+      - runtime
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+      - --project=$PROJECT_ID
+      - --region=${_REGION}
+      - --platform=managed
+      - --service-account=${_RUNTIME_SERVICE_ACCOUNT}
+      - --allow-unauthenticated
+      - --ingress=all
+      - --cpu=1
+      - --cpu-throttling
+      - --memory=2Gi
+      - --concurrency=1
+      - --min-instances=0
+      - --max-instances=1
+      - --timeout=120s
+      - --set-env-vars=DB_HOST=${_DB_HOST},DB_PORT=${_DB_PORT},DB_NAME=${_DB_NAME},DB_USER=${_DB_USER},DB_SSLMODE=require,S3_ENDPOINT=${_S3_ENDPOINT},S3_REGION=${_S3_REGION},S3_BUCKET=${_S3_BUCKET},MAX_UPLOAD_BYTES=10485760,MAX_REQUEST_BYTES=11534336,MAX_IMAGE_PIXELS=24000000
+      - --set-secrets=API_KEY=${_API_KEY_SECRET}:latest,DB_PASSWORD=${_DB_PASSWORD_SECRET}:latest,S3_ACCESS_KEY_ID=${_S3_ACCESS_KEY_SECRET}:latest,S3_SECRET_ACCESS_KEY=${_S3_SECRET_KEY_SECRET}:latest
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+
+substitutions:
+  _REGION: us-west1
+  _REPOSITORY: anemiaiaback
+  _SERVICE: anemiaiaback
+  _RUNTIME_SERVICE_ACCOUNT: replace-with-runtime-service-account
+  _DB_HOST: replace-with-supavisor-host
+  _DB_PORT: "6543"
+  _DB_NAME: AnemiaIA
+  _DB_USER: replace-with-supavisor-user
+  _S3_ENDPOINT: https://replace-with-project-ref.storage.supabase.co/storage/v1/s3
+  _S3_REGION: us-west-2
+  _S3_BUCKET: ImagesProcesed
+  _API_KEY_SECRET: anemiaiaback-api-key
+  _DB_PASSWORD_SECRET: anemiaiaback-db-password
+  _S3_ACCESS_KEY_SECRET: anemiaiaback-s3-access-key
+  _S3_SECRET_KEY_SECRET: anemiaiaback-s3-secret-key
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from anemiaiaback!")
+"""AnemiaIA conjunctiva capture backend."""

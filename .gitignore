@@ -1,0 +1,13 @@
+.venv/
+.env
+.idea/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+local_bucket/*
+!local_bucket/.gitkeep
+dist/
+build/
+*.egg-info/
+
