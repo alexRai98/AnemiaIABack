@@ -43,9 +43,11 @@ class OpenCvConjunctivaProcessor:
         cascade = cv2.CascadeClassifier(str(self._cascade_path))
         if cascade.empty():
             raise ConfigurationError("Eye detection model could not be loaded")
-        min_eye_px = max(30, min(red.shape[0], red.shape[1]) // 5)
+        gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+        gray_clahe = clahe.apply(gray)
+        min_eye_px = max(30, min(gray_clahe.shape[0], gray_clahe.shape[1]) // 5)
         eyes = cascade.detectMultiScale(
-            red, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
+            gray_clahe, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
         )
         if len(eyes) == 0:
             raise EyeNotFoundError("No eye was detected")
@@ -68,7 +70,7 @@ class OpenCvConjunctivaProcessor:
             dp=1,
             minDist=h_m // 2,
             param1=100,
-            param2=10,
+            param2=20,
             minRadius=int(h_m / 12),
             maxRadius=int(h_m / 6),
         )
