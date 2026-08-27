@@ -6,7 +6,6 @@ import numpy as np
 from anemiaiaback.capture.domain.errors import (
     ConjunctivaContourNotFoundError,
     ConfigurationError,
-    EyeNotFoundError,
     InvalidConjunctivaCropError,
     InvalidImageError,
     IrisNotFoundError,
@@ -50,30 +49,51 @@ class OpenCvConjunctivaProcessor:
             gray_clahe, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
         )
         if len(eyes) == 0:
-            raise EyeNotFoundError("No eye was detected")
-
-        x, y, w, h = self._select_central_eye(eyes, original.shape[1], original.shape[0])
-        margin_w, margin_h = int(w * 0.15), int(h * 0.15)
-        x_m, y_m = max(0, x - margin_w), max(0, y - margin_h)
-        w_m = min(original.shape[1] - x_m, w + 2 * margin_w)
-        h_m = min(original.shape[0] - y_m, h + 2 * margin_h)
-        roi_color = original[y_m : y_m + h_m, x_m : x_m + w_m].copy()
-        roi_green = green[y_m : y_m + h_m, x_m : x_m + w_m].copy()
+            # Close-up capture: the full image IS the eye, no cascade crop needed
+            x_m, y_m = 0, 0
+            h_m, w_m = original.shape[0], original.shape[1]
+            roi_color = original
+            roi_green = green
+            close_up = True
+        else:
+            x, y, w, h = self._select_central_eye(eyes, original.shape[1], original.shape[0])
+            margin_w, margin_h = int(w * 0.15), int(h * 0.15)
+            x_m, y_m = max(0, x - margin_w), max(0, y - margin_h)
+            w_m = min(original.shape[1] - x_m, w + 2 * margin_w)
+            h_m = min(original.shape[0] - y_m, h + 2 * margin_h)
+            roi_color = original[y_m : y_m + h_m, x_m : x_m + w_m].copy()
+            roi_green = green[y_m : y_m + h_m, x_m : x_m + w_m].copy()
+            close_up = False
 
         blurred_green = cv2.GaussianBlur(roi_green, (19, 19), 0)
         _, threshold_green = cv2.threshold(
             blurred_green, 69, 255, cv2.THRESH_OTSU + cv2.THRESH_BINARY_INV
         )
-        circles = cv2.HoughCircles(
-            threshold_green,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=h_m // 2,
-            param1=100,
-            param2=20,
-            minRadius=int(h_m / 12),
-            maxRadius=int(h_m / 6),
-        )
+        if close_up:
+            # Wider radius range for full-image iris detection; try progressively lenient thresholds
+            min_iris_r = max(30, min(h_m, w_m) // 10)
+            max_iris_r = min(h_m, w_m) // 2
+            param2_candidates = [20, 10, 5]
+        else:
+            min_iris_r = int(h_m / 12)
+            max_iris_r = int(h_m / 6)
+            param2_candidates = [20]
+
+        circles = None
+        for p2 in param2_candidates:
+            circles = cv2.HoughCircles(
+                threshold_green,
+                cv2.HOUGH_GRADIENT,
+                dp=1,
+                minDist=h_m // 2,
+                param1=100,
+                param2=p2,
+                minRadius=min_iris_r,
+                maxRadius=max_iris_r,
+            )
+            if circles is not None and len(circles[0]) > 0:
+                break
+                
         if circles is None or len(circles[0]) == 0:
             raise IrisNotFoundError("No iris was detected")
 
