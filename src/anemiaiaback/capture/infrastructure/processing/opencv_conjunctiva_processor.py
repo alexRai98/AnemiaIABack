@@ -43,8 +43,9 @@ class OpenCvConjunctivaProcessor:
         cascade = cv2.CascadeClassifier(str(self._cascade_path))
         if cascade.empty():
             raise ConfigurationError("Eye detection model could not be loaded")
+        min_eye_px = max(30, min(red.shape[0], red.shape[1]) // 5)
         eyes = cascade.detectMultiScale(
-            red, scaleFactor=1.01, minNeighbors=7, minSize=(650, 650)
+            red, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
         )
         if len(eyes) == 0:
             raise EyeNotFoundError("No eye was detected")
