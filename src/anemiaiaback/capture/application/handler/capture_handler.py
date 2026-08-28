@@ -34,11 +34,28 @@ async def create_capture_handler(
     service: Annotated[CaptureService, Depends(get_capture_service)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CaptureResponse:
+    # Debug logging
+    import logging
+    logger = logging.getLogger("uvicorn")
+    logger.info(f"📥 Request received - DNI: {dni}, Sex: {sex}, Age: {age}, Image: {image.filename}, ContentType: {image.content_type}, Size: {image.size if hasattr(image, 'size') else 'unknown'}")
+    
     image_bytes = await image.read(settings.max_upload_bytes + 1)
+    logger.info(f"📦 Image bytes read: {len(image_bytes)} bytes")
+    
     if len(image_bytes) > settings.max_upload_bytes:
         raise UploadTooLargeError("Uploaded image exceeds the allowed size")
-    result = await run_in_threadpool(
-        service.execute,
-        CreateCaptureCommand(image=image_bytes, dni=dni, sex=sex, age=age),
-    )
-    return CaptureResponse.model_validate(result.__dict__)
+    
+    try:
+        logger.info(f"🔄 Executing use case...")
+        result = await run_in_threadpool(
+            service.execute,
+            CreateCaptureCommand(image=image_bytes, dni=dni, sex=sex, age=age),
+        )
+        logger.info(f"✅ Use case executed successfully. Result: {result}")
+        logger.info(f"📋 Result dict: {result.__dict__}")
+        response = CaptureResponse.model_validate(result.__dict__)
+        logger.info(f"✅ Response created: {response}")
+        return response
+    except Exception as e:
+        logger.error(f"❌ Error during processing: {type(e).__name__}: {str(e)}")
+        raise

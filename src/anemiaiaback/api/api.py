@@ -3,6 +3,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -100,6 +101,16 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.capture_service = service
     app.state.startup_error = None
+    
+    # CORS middleware - permite acceso desde dispositivos en la red local
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # En producción, especifica los orígenes permitidos
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_request_bytes=resolved_settings.max_request_bytes,

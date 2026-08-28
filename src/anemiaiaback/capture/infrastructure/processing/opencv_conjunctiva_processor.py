@@ -6,6 +6,7 @@ import numpy as np
 from anemiaiaback.capture.domain.errors import (
     ConjunctivaContourNotFoundError,
     ConfigurationError,
+    EyeNotFoundError,
     InvalidConjunctivaCropError,
     InvalidImageError,
     IrisNotFoundError,
@@ -42,56 +43,35 @@ class OpenCvConjunctivaProcessor:
         cascade = cv2.CascadeClassifier(str(self._cascade_path))
         if cascade.empty():
             raise ConfigurationError("Eye detection model could not be loaded")
-        gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
-        gray_clahe = clahe.apply(gray)
-        min_eye_px = max(30, min(gray_clahe.shape[0], gray_clahe.shape[1]) // 5)
+        min_eye_px = max(30, min(red.shape[0], red.shape[1]) // 5)
         eyes = cascade.detectMultiScale(
-            gray_clahe, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
+            red, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye_px, min_eye_px)
         )
         if len(eyes) == 0:
-            # Close-up capture: the full image IS the eye, no cascade crop needed
-            x_m, y_m = 0, 0
-            h_m, w_m = original.shape[0], original.shape[1]
-            roi_green = green
-            close_up = True
-        else:
-            x, y, w, h = self._select_central_eye(eyes, original.shape[1], original.shape[0])
-            margin_w, margin_h = int(w * 0.15), int(h * 0.15)
-            x_m, y_m = max(0, x - margin_w), max(0, y - margin_h)
-            w_m = min(original.shape[1] - x_m, w + 2 * margin_w)
-            h_m = min(original.shape[0] - y_m, h + 2 * margin_h)
-            roi_green = green[y_m : y_m + h_m, x_m : x_m + w_m].copy()
-            close_up = False
+            raise EyeNotFoundError("No eye was detected")
+
+        x, y, w, h = self._select_central_eye(eyes, original.shape[1], original.shape[0])
+        margin_w, margin_h = int(w * 0.15), int(h * 0.15)
+        x_m, y_m = max(0, x - margin_w), max(0, y - margin_h)
+        w_m = min(original.shape[1] - x_m, w + 2 * margin_w)
+        h_m = min(original.shape[0] - y_m, h + 2 * margin_h)
+        roi_color = original[y_m : y_m + h_m, x_m : x_m + w_m].copy()
+        roi_green = green[y_m : y_m + h_m, x_m : x_m + w_m].copy()
 
         blurred_green = cv2.GaussianBlur(roi_green, (19, 19), 0)
         _, threshold_green = cv2.threshold(
             blurred_green, 69, 255, cv2.THRESH_OTSU + cv2.THRESH_BINARY_INV
         )
-        if close_up:
-            # Wider radius range for full-image iris detection; try progressively lenient thresholds
-            min_iris_r = max(30, min(h_m, w_m) // 10)
-            max_iris_r = min(h_m, w_m) // 2
-            param2_candidates = [20, 10, 5]
-        else:
-            min_iris_r = int(h_m / 12)
-            max_iris_r = int(h_m / 6)
-            param2_candidates = [20]
-
-        circles = None
-        for p2 in param2_candidates:
-            circles = cv2.HoughCircles(
-                threshold_green,
-                cv2.HOUGH_GRADIENT,
-                dp=1,
-                minDist=h_m // 2,
-                param1=100,
-                param2=p2,
-                minRadius=min_iris_r,
-                maxRadius=max_iris_r,
-            )
-            if circles is not None and len(circles[0]) > 0:
-                break
-
+        circles = cv2.HoughCircles(
+            threshold_green,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=h_m // 2,
+            param1=100,
+            param2=10,
+            minRadius=int(h_m / 12),
+            maxRadius=int(h_m / 6),
+        )
         if circles is None or len(circles[0]) == 0:
             raise IrisNotFoundError("No iris was detected")
 
@@ -100,20 +80,15 @@ class OpenCvConjunctivaProcessor:
             np.around(circles[0]).astype(int),
             key=lambda c: ((int(c[0]) - center[0]) ** 2 + (int(c[1]) - center[1]) ** 2, int(c[2])),
         )
-        cx_roi, cy_roi, radius = map(int, circle)
-        # Map the iris center back to full-image coordinates: a manually retracted
-        # eyelid can expose conjunctiva that extends below the cascade's eye ROI.
-        cx, cy = cx_roi + x_m, cy_roi + y_m
-        full_h, full_w = original.shape[0], original.shape[1]
-        y_start = max(0, cy + int(radius * 1.3))
-        y_end = min(full_h, cy + int(radius * 3.1))
-        x_start = max(0, cx - int(radius * 1.5))
-        x_end = min(full_w, cx + int(radius * 1.5))
-        if not (0 <= y_start < y_end <= full_h and 0 <= x_start < x_end <= full_w):
+        cx, cy, radius = map(int, circle)
+        y_start, y_end = cy + int(radius * 1.3), cy + int(radius * 3.1)
+        x_start, x_end = cx - int(radius * 1.5), cx + int(radius * 1.5)
+        if not (0 <= y_start < y_end < h_m and 0 < x_start < x_end < w_m):
             raise InvalidConjunctivaCropError("Detected iris produces an invalid conjunctiva crop")
 
-        conjunctiva = original[y_start:y_end, x_start:x_end].copy()
-        conjunctiva_red = red[y_start:y_end, x_start:x_end].copy()
+        conjunctiva = roi_color[y_start:y_end, x_start:x_end].copy()
+        roi_red = red[y_m : y_m + h_m, x_m : x_m + w_m]
+        conjunctiva_red = roi_red[y_start:y_end, x_start:x_end].copy()
         if conjunctiva.size == 0 or conjunctiva_red.size == 0:
             raise InvalidConjunctivaCropError("Conjunctiva crop is empty")
         segmented = self._segment(conjunctiva, conjunctiva_red)

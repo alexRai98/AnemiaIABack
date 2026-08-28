@@ -1,3 +1,4 @@
+from datetime import datetime
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -44,7 +45,9 @@ class SupabaseS3ImageBucket:
     def save_png(self, image: bytes) -> str:
         if not image.startswith(b"\x89PNG\r\n\x1a\n"):
             raise StorageError("Image storage accepts encoded PNG data only")
-        key = f"{uuid4()}.png"
+        # Generar nombre con formato: aa-(dia-hora-minuto-segundo)
+        now = datetime.now()
+        key = f"aa-{now.strftime('%d-%H-%M-%S')}.png"
         try:
             self._client.put_object(
                 Bucket=self._bucket,
